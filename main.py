@@ -363,15 +363,21 @@ def get_drop_dates() -> list:
     """
 
     # Drops Site
-    url: str = "https://www.supremecommunity.com/season/fall-winter2025/droplists/"
+    url: str = "https://www.supremecommunity.com/season/spring-summer2026/droplists/"
 
     # Fetching the source code
     response: requests.models.Response = get(url)
     if response.status_code == 200:
         soup: BeautifulSoup = BeautifulSoup(response.text, "html.parser")
-        # Find all dates
-        dates_divs: list = soup.find_all("div", {"class": "week-item-subtitle"})
-        dates: list[str] = [date.text for date in dates_divs]
+        # Find all droplist rows and extract dates from href
+        droplist_links: list = soup.find_all("a", {"class": "droplist-row"})
+        dates: list[str] = []
+        for link in droplist_links:
+            href = link.get("href", "")
+            # Extract date from href like /season/spring-summer2026/droplist/2026-02-26/
+            parts = href.strip("/").split("/")
+            if len(parts) >= 4:
+                dates.append(parts[-1])  # Gets "2026-02-26"
 
         return dates
 
@@ -446,68 +452,64 @@ def fetch_items(drop_date: str, item_category: str) -> dict:
     if item_category == "Tops":
         item_category: str = "tops-sweaters"
 
-    # Constructing URL based on the Drop Date
+    # Constructing URL based on the Drop Date (already in YYYY-MM-DD format)
     url: str = (
-        f"https://www.supremecommunity.com/season/fall-winter2025/droplist/{convert_date(drop_date)}"
+        f"https://www.supremecommunity.com/season/spring-summer2026/droplist/{drop_date}"
     )
 
     # Creating an Object to store the fetched items
     items_dict: dict = dict()
-
-    # Initializing item_divs to an empty list
-    item_divs: list = list()
 
     # Fetching all items of a certain type
     response: requests.models.Response = get(url)
     if response.status_code == 200:
         soup: BeautifulSoup = BeautifulSoup(response.text, "html.parser")
         item_divs: list = soup.find_all(
-            "div", {"data-category": f"{item_category.lower()}"}
+            "div", {"class": "item-card", "data-category": f"{item_category.lower()}"}
         )
 
-    # Storing Items' Infos
-    for item in item_divs:
-        item_name: str = item.find(
-            "div", {"class": "catalog-item__title"}
-        ).text.replace("\n", "")
-        item_price: str = (
-            item.find("span", {"class": "catalog-label-price"})
-            .text.replace("\n", "")
-            .split("/")[0]
-            if item.find("span", {"class": "catalog-label-price"})
-            else "None"
-        )
-        item_image: str = item.find("img")["src"]
-        item_colors: list = list()
-        item_full_link: str = (
-            f'https://www.supremecommunity.com{item.find("a")["href"]}'
-        )
-        response: requests.models.Response = get(item_full_link)
-        if item_price != "None" and response.status_code == 200:
-            soup: BeautifulSoup = BeautifulSoup(response.text, "html.parser")
-            colors_div: list = soup.find_all(
-                "div", {"class": "product-options active"}
-            )[1]
-            item_colors: list = [
-                color.text.replace("\n", "")
-                for color in colors_div.find_all("div", {"class": "product-option"})
-            ]
-            # Removing the VOTE button (not a color option, but a public pool)
-            if "VOTING >" in item_colors:
-                item_colors.remove("VOTING >")
-        item_votes: tuple[str, str] = (
-            soup.find("div", {"class": "like"}).text,
-            soup.find("div", {"class": "dislike"}).text,
-        )
-        item_type: str = item["data-category"]
-        items_dict[item_name.strip()] = {
-            "category": item_type.strip(),
-            "price": item_price.strip(),
-            "image": item_image,
-            "colors": [color.strip() for color in item_colors if type(color) == str],
-            "link": item_full_link,
-            "votes": item_votes,
-        }
+        # Storing Items' Infos
+        for item in item_divs:
+            # Get data from attributes
+            item_name: str = item.get("data-name", "Unknown")
+            item_price: str = f"${item.get('data-price', '0')}"
+            item_type: str = item.get("data-category", "")
+
+            # Get image
+            img_tag = item.find("img")
+            item_image: str = img_tag["src"] if img_tag else ""
+
+            # Get link
+            link_tag = item.find("a", {"class": "item-card-link"})
+            item_full_link: str = f'https://www.supremecommunity.com{link_tag["href"]}' if link_tag else ""
+
+            # Get votes from data attributes
+            votes_div = item.find("div", {"class": "item-card-votes"})
+            if votes_div:
+                item_votes: tuple[str, str] = (
+                    votes_div.get("data-up", "0"),
+                    votes_div.get("data-dn", "0"),
+                )
+            else:
+                item_votes = ("0", "0")
+
+            # Fetch colors from item detail page
+            item_colors: list = []
+            if item_full_link:
+                detail_response = get(item_full_link)
+                if detail_response.status_code == 200:
+                    detail_soup = BeautifulSoup(detail_response.text, "html.parser")
+                    color_tags = detail_soup.find_all("span", {"class": "colorway-tag"})
+                    item_colors = [tag.text.strip() for tag in color_tags]
+
+            items_dict[item_name.strip()] = {
+                "category": item_type.strip(),
+                "price": item_price.strip(),
+                "image": item_image,
+                "colors": item_colors,
+                "link": item_full_link,
+                "votes": item_votes,
+            }
 
     return items_dict
 
