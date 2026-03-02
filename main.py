@@ -738,7 +738,7 @@ class BasketCheckout:
                                 ui.label(item["size"]).classes("font-mono")
                         ui.space()
                         if item["price"] != "None":
-                            total += int(item["price"].replace("$", ""))
+                            total += float(item["price"].replace("$", ""))
                             if i == len(data) - 1:
                                 with ui.column(align_items="stretch"):
                                     with ui.row():
